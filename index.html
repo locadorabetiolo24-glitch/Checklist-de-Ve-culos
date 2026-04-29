@@ -386,8 +386,25 @@ function setAvaria(btn,id,obj,v){
 
 function initFotos(){[...FOTO_SECS_DEV,...FOTO_SECS_ENT,...FOTO_SECS_SIMPLES].forEach(s=>{if(!photos[s.id])photos[s.id]=[];});}
 
+function restoreFotosFromSession(){
+  try{
+    const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
+    Object.keys(saved).forEach(secId=>{
+      if(!photos[secId])photos[secId]=[];
+      // Restaurar apenas dataUrls que ainda nao estao em photos
+      const existingUrls=photos[secId].map(p=>p.dataUrl);
+      saved[secId].forEach(dataUrl=>{
+        if(!existingUrls.includes(dataUrl)){
+          photos[secId].push({file:null,dataUrl});
+        }
+      });
+    });
+  }catch(ex){}
+}
+
 function renderStep2(c){
   const tipo=getTipo();
+  restoreFotosFromSession();
   const secs=tipo==='substituicao'?[...FOTO_SECS_DEV,...FOTO_SECS_ENT]:tipo==='devolucao'?FOTO_SECS_DEV:FOTO_SECS_SIMPLES;
   const html=secs.map(sec=>{
     const grid=(photos[sec.id]||[]).map((p,i)=>'<div class="photo-thumb"><img src="'+p.dataUrl+'"/><button class="photo-del" onclick="delFoto(\''+sec.id+'\','+i+')">x</button></div>').join('');
@@ -396,10 +413,35 @@ function renderStep2(c){
   c.innerHTML='<div class="sec-card"><div class="sec-head"><div class="sec-head-icon"><svg viewBox="0 0 14 14" fill="none"><rect x="1" y="3" width="12" height="9" rx="1.5" stroke="#C0392B" stroke-width="1.2"/><circle cx="7" cy="7.5" r="2" stroke="#C0392B" stroke-width="1.2"/></svg></div><div class="sec-head-title">Fotos</div></div>'+html+'</div><div class="btn-row"><button class="btn-back" onclick="goStep(1)">Voltar</button><button class="btn-next" onclick="goStep(3)">Proximo - Assinatura</button></div>';
 }
 
-function addFotos(input,secId){Array.from(input.files).forEach(file=>{const r=new FileReader();r.onload=e=>{photos[secId].push({file,dataUrl:e.target.result});if(currentStep===2)renderStep();};r.readAsDataURL(file);});input.value='';}
+function addFotos(input,secId){
+  Array.from(input.files).forEach(file=>{
+    const r=new FileReader();
+    r.onload=e=>{
+      if(!photos[secId])photos[secId]=[];
+      photos[secId].push({file,dataUrl:e.target.result});
+      // Salvar no sessionStorage para nao perder ao voltar da camera
+      try{
+        const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
+        if(!saved[secId])saved[secId]=[];
+        saved[secId].push(e.target.result);
+        sessionStorage.setItem('fotos_vistoria',JSON.stringify(saved));
+      }catch(ex){}
+      if(currentStep===2)renderStep();
+    };
+    r.readAsDataURL(file);
+  });
+  input.value='';
+}
 function delFoto(secId,idx){photos[secId].splice(idx,1);if(currentStep===2)renderStep();}
 
 function renderStep3(c){
+  // Restaurar foto CNH se houver no session
+  try{
+    const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
+    if(saved['cnh']&&saved['cnh'][0]&&(!photos['cnh']||!photos['cnh'].length)){
+      photos['cnh']=[{file:null,dataUrl:saved['cnh'][0]}];
+    }
+  }catch(ex){}
   const today=new Date().toISOString().split('T')[0];
   c.innerHTML='<div class="sec-card"><div class="sec-head"><div class="sec-head-icon"><svg viewBox="0 0 14 14" fill="none"><path d="M2 11c1-2 2-3.5 2.5-4.5s2.5-1 3.5 0 0 2.5-1 3.5-2.5 1-3.5 0" stroke="#C0392B" stroke-width="1.2"/><path d="M8.5 3l2 2-4 4-2-.5.5-2 3.5-3.5z" stroke="#C0392B" stroke-width="1.2"/></svg></div><div class="sec-head-title">Assinatura e finalizacao</div></div><div class="mb10"><label class="flabel">Vistoriador *</label><input class="fi" type="text" id="f_vistoriador" value="'+(perfilAtual?.nome||'')+'" placeholder="Nome do vistoriador"/></div><div class="row2"><div><label class="flabel">Cidade</label><input class="fi" type="text" id="f_cidade" placeholder="Cidade"/></div><div><label class="flabel">Data</label><input class="fi" type="date" id="f_dataSign" value="'+today+'"/></div></div><div class="mb10"><label class="flabel">Assinatura do vistoriador *</label><div class="sign-wrap"><canvas class="sig" id="sigV"></canvas><div class="sig-line"></div><div class="sig-hint">Assine acima</div></div><button class="btn-clear" onclick="limparSig(\'sigV\',\'hasSigV\')">Limpar</button></div><div class="mb10"><label class="flabel">Assinatura do cliente *</label><div class="sign-wrap"><canvas class="sig" id="sigC"></canvas><div class="sig-line"></div><div class="sig-hint">Assine acima</div></div><button class="btn-clear" onclick="limparSig(\'sigC\',\'hasSigC\')">Limpar</button></div><div class="accept-box"><input type="checkbox" id="aceite"/><label for="aceite">Confirmo que as informacoes e fotos refletem o estado real do veiculo nesta vistoria.</label></div><button class="btn-next" onclick="salvarVistoria()" id="btnSalvar" style="width:100%">Finalizar e salvar vistoria</button><div id="successBox"></div></div><div class="btn-row"><button class="btn-back" onclick="goStep(2)">Voltar</button></div>';
   setTimeout(()=>{setupSig('sigV','hasSigV');setupSig('sigC','hasSigC');},200);
@@ -458,7 +500,7 @@ async function salvarVistoria(){
     const allSecs=[...FOTO_SECS_DEV,...FOTO_SECS_ENT,...FOTO_SECS_SIMPLES];
     for(const sec of allSecs){for(const p of(photos[sec.id]||[])){const path='vistorias/'+visId+'/'+sec.id+'_'+Date.now()+'.jpg';const {data:upData}=await sb.storage.from('Fotos - Vistorias').upload(path,p.file,{contentType:'image/jpeg',upsert:true});if(upData){const {data:url}=sb.storage.from('Fotos - Vistorias').getPublicUrl(path);await sb.from('fotos_vistoria').insert({vistoria_id:visId,secao:sec.id,nome_arquivo:path,url_publica:url?.publicUrl,tamanho_bytes:p.file.size});totalFotos++;}}}
     document.getElementById('successBox').innerHTML='<div class="success-box"><div class="ok-icon"><svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M4 11l5 5 9-9" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Vistoria salva!</h3><p>ID: <strong>'+vis.codigo+'</strong> | '+totalFotos+' foto(s)<br>Email enviado para '+EMAIL_EMPRESA+'</p></div>';
-    btn.style.display='none';
+    btn.style.display='none';try{sessionStorage.removeItem('fotos_vistoria');}catch(ex){}
     setTimeout(()=>{Object.keys(avariasDiv).forEach(k=>delete avariasDiv[k]);Object.keys(avariasEnt).forEach(k=>delete avariasEnt[k]);photos={};initFotos();nivelDev='Cheio';nivelEnt='Cheio';currentStep=0;renderStep();},6000);
   }catch(e){console.error(e);showToast('Erro ao salvar. Tente novamente.');btn.disabled=false;btn.textContent='Finalizar e salvar vistoria';}
 }
@@ -471,18 +513,27 @@ function addFotoCnh(input){
   const r = new FileReader();
   r.onload = e => {
     photos['cnh'] = [{file, dataUrl: e.target.result}];
-    const grid = document.getElementById('pg_cnh');
-    const addBtn = document.getElementById('addCnhBtn');
-    const inp = document.getElementById('fi_cnh');
-    grid.innerHTML = '';
-    const thumb = document.createElement('div');
-    thumb.className = 'photo-thumb';
-    thumb.innerHTML = '<img src="'+e.target.result+'"/><button class="photo-del" onclick="delFotoCnh()">x</button>';
-    grid.appendChild(thumb);
-    grid.appendChild(addBtn);
-    grid.appendChild(inp);
+    try{
+      const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
+      saved['cnh']=[e.target.result];
+      sessionStorage.setItem('fotos_vistoria',JSON.stringify(saved));
+    }catch(ex){}
+    renderCnhGrid(e.target.result);
   };
   r.readAsDataURL(file);
+}
+function renderCnhGrid(dataUrl){
+  const grid = document.getElementById('pg_cnh');
+  if(!grid)return;
+  const addBtn = document.getElementById('addCnhBtn');
+  const inp = document.getElementById('fi_cnh');
+  grid.innerHTML = '';
+  const thumb = document.createElement('div');
+  thumb.className = 'photo-thumb';
+  thumb.innerHTML = '<img src="'+dataUrl+'"/><button class="photo-del" onclick="delFotoCnh()">x</button>';
+  grid.appendChild(thumb);
+  grid.appendChild(addBtn);
+  grid.appendChild(inp);
 }
 function delFotoCnh(){
   photos['cnh']=[];
