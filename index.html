@@ -217,6 +217,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let usuarioAtual=null,perfilAtual=null,currentStep=0;
 var avariasDiv={},avariasEnt={};
+var dadosForm={tipo:'',data:'',hora:'',cliente:'',cnh:'',contrato:'',emailCliente:'',placa:'',km:'',modelo:'',placa2:'',km2:'',modelo2:'',cidade:'',vistoriador:''};
 var avariasDiv={},avariasEnt={};
 let photos={},nivelDev='Cheio',nivelEnt='Cheio';
 let hasSigV=false,hasSigC=false;
@@ -320,7 +321,14 @@ function renderStep(){
   const c=document.getElementById('stepContent');
   [renderStep0,renderStep1,renderStep2,renderStep3][currentStep](c);
 }
-function goStep(n){salvarEstado();currentStep=n;renderStep();window.scrollTo(0,0);}
+function goStep(n){
+  // Salvar dados dos campos antes de trocar de passo
+  const campos=['f_tipo','f_data','f_hora','f_cliente','f_cnh','f_contrato','f_emailCliente','f_placa','f_km','f_modelo','f_placa2','f_km2','f_modelo2'];
+  const chaves=['tipo','data','hora','cliente','cnh','contrato','emailCliente','placa','km','modelo','placa2','km2','modelo2'];
+  campos.forEach((id,i)=>{const el=document.getElementById(id);if(el)dadosForm[chaves[i]]=el.value;});
+  salvarEstado();
+  currentStep=n;renderStep();window.scrollTo(0,0);
+}
 
 function renderStep0(c){
   const today=new Date().toISOString().split('T')[0];
@@ -502,14 +510,14 @@ async function salvarVistoria(){
   const btn=document.getElementById('btnSalvar');
   btn.disabled=true;btn.textContent='Salvando...';
   try{
-    const placa=document.getElementById('f_placa').value.trim().toUpperCase();
+    const placa=(dadosForm.placa||document.getElementById('f_placa')?.value||'').trim().toUpperCase();
     let veiculoId=null;
     const {data:vex}=await sb.from('veiculos').select('id').eq('placa',placa).maybeSingle();
-    if(vex){veiculoId=vex.id;}else{const {data:vn}=await sb.from('veiculos').insert({placa,modelo:document.getElementById('f_modelo')?.value||''}).select('id').single();veiculoId=vn?.id;}
-    const nomeCliente=document.getElementById('f_cliente').value.trim();
+    if(vex){veiculoId=vex.id;}else{const {data:vn}=await sb.from('veiculos').insert({placa,modelo:dadosForm.modelo||''}).select('id').single();veiculoId=vn?.id;}
+    const nomeCliente=(dadosForm.cliente||document.getElementById('f_cliente')?.value||'').trim();
     let clienteId=null;
     const {data:cex}=await sb.from('clientes').select('id').eq('nome',nomeCliente).maybeSingle();
-    if(cex){clienteId=cex.id;}else{const {data:cn}=await sb.from('clientes').insert({nome:nomeCliente,documento:document.getElementById('f_cnh').value,email:document.getElementById('f_emailCliente').value}).select('id').single();clienteId=cn?.id;}
+    if(cex){clienteId=cex.id;}else{const {data:cn}=await sb.from('clientes').insert({nome:nomeCliente,documento:dadosForm.cnh||'',email:dadosForm.emailCliente||''}).select('id').single();clienteId=cn?.id;}
     const sigVC=document.getElementById('sigV').toDataURL('image/png');
     const sigCC=document.getElementById('sigC').toDataURL('image/png');
     let obsTotal='';
@@ -517,12 +525,14 @@ async function salvarVistoria(){
     const obsEnt=document.getElementById('obs_ent');
     if(obsDev?.value)obsTotal+='Devolucao: '+obsDev.value;
     if(obsEnt?.value)obsTotal+=(obsTotal?'\n':'')+'Entrega: '+obsEnt.value;
+    const cidadeSign=document.getElementById('f_cidade')?.value||dadosForm.cidade||'';
+    const vistoriadorNome=document.getElementById('f_vistoriador')?.value||dadosForm.vistoriador||perfilAtual?.nome||'';
     const {data:vis,error:visErr}=await sb.from('vistorias').insert({
-      tipo:getTipo(),veiculo_id:veiculoId,cliente_id:clienteId,vistoriador_id:perfilAtual?.id||null,
-      km_atual:parseInt(document.getElementById('f_km').value)||null,
-      nivel_combustivel:nivelDev,numero_contrato:document.getElementById('f_contrato')?.value||'',
-      observacoes:obsTotal,cidade_assinatura:document.getElementById('f_cidade').value,
-      data_vistoria:document.getElementById('f_data').value,hora_vistoria:document.getElementById('f_hora').value,
+      tipo:dadosForm.tipo||getTipo(),veiculo_id:veiculoId,cliente_id:clienteId,vistoriador_id:perfilAtual?.id||null,
+      km_atual:parseInt(dadosForm.km)||null,
+      nivel_combustivel:nivelDev,numero_contrato:dadosForm.contrato||'',
+      observacoes:obsTotal,cidade_assinatura:cidadeSign,
+      data_vistoria:dadosForm.data||new Date().toISOString().split('T')[0],hora_vistoria:dadosForm.hora||'',
       assinatura_vistoriador:sigVC,assinatura_cliente:sigCC,status:'concluida',finalizado_em:new Date().toISOString()
     }).select('id,codigo').single();
     if(visErr)throw visErr;
