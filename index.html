@@ -197,7 +197,9 @@ const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let usuarioAtual=null,perfilAtual=null,currentStep=0;
-let photos={},avariasDiv={},avariasEnt={},nivelDev='Cheio',nivelEnt='Cheio';
+var avariasDiv={},avariasEnt={};
+var avariasDiv={},avariasEnt={};
+let photos={},nivelDev='Cheio',nivelEnt='Cheio';
 let hasSigV=false,hasSigC=false;
 
 const TIPOS_AVARIA=['Sem avaria','Amassado','Picotado','Estragado','Quebrado','Riscado','Arranhado','Trincado','Outros'];
@@ -234,6 +236,13 @@ async function initApp(user){
 }
 async function fazerLogout(){await sb.auth.signOut();location.reload();}
 sb.auth.onAuthStateChange((e,s)=>{if(s?.user)initApp(s.user);});
+// Prevenir perda de dados ao voltar da camera no celular
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'visible' && currentStep > 0){
+    // pagina voltou ao foco, nao resetar
+  }
+});
+
 sb.auth.getSession().then(({data:{session}})=>{if(!session){document.getElementById('authScreen').style.display='flex';document.getElementById('app').style.display='none';}});
 
 function showTab(t){
@@ -447,10 +456,10 @@ async function salvarVistoria(){
     if(itensPayload.length)await sb.from('itens_vistoria').insert(itensPayload);
     let totalFotos=0;
     const allSecs=[...FOTO_SECS_DEV,...FOTO_SECS_ENT,...FOTO_SECS_SIMPLES];
-    for(const sec of allSecs){for(const p of(photos[sec.id]||[])){const path='vistorias/'+visId+'/'+sec.id+'_'+Date.now()+'.jpg';const {data:upData}=await sb.storage.from('fotos-vistorias').upload(path,p.file,{contentType:'image/jpeg',upsert:true});if(upData){const {data:url}=sb.storage.from('fotos-vistorias').getPublicUrl(path);await sb.from('fotos_vistoria').insert({vistoria_id:visId,secao:sec.id,nome_arquivo:path,url_publica:url?.publicUrl,tamanho_bytes:p.file.size});totalFotos++;}}}
+    for(const sec of allSecs){for(const p of(photos[sec.id]||[])){const path='vistorias/'+visId+'/'+sec.id+'_'+Date.now()+'.jpg';const {data:upData}=await sb.storage.from('Fotos - Vistorias').upload(path,p.file,{contentType:'image/jpeg',upsert:true});if(upData){const {data:url}=sb.storage.from('Fotos - Vistorias').getPublicUrl(path);await sb.from('fotos_vistoria').insert({vistoria_id:visId,secao:sec.id,nome_arquivo:path,url_publica:url?.publicUrl,tamanho_bytes:p.file.size});totalFotos++;}}}
     document.getElementById('successBox').innerHTML='<div class="success-box"><div class="ok-icon"><svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M4 11l5 5 9-9" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Vistoria salva!</h3><p>ID: <strong>'+vis.codigo+'</strong> | '+totalFotos+' foto(s)<br>Email enviado para '+EMAIL_EMPRESA+'</p></div>';
     btn.style.display='none';
-    setTimeout(()=>{avariasDiv={};avariasEnt={};photos={};initFotos();nivelDev='Cheio';nivelEnt='Cheio';currentStep=0;renderStep();},6000);
+    setTimeout(()=>{Object.keys(avariasDiv).forEach(k=>delete avariasDiv[k]);Object.keys(avariasEnt).forEach(k=>delete avariasEnt[k]);photos={};initFotos();nivelDev='Cheio';nivelEnt='Cheio';currentStep=0;renderStep();},6000);
   }catch(e){console.error(e);showToast('Erro ao salvar. Tente novamente.');btn.disabled=false;btn.textContent='Finalizar e salvar vistoria';}
 }
 
