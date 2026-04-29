@@ -234,12 +234,26 @@ async function initApp(user){
   if(perfilAtual?.perfil==='vistoriador')document.getElementById('tabPainel').style.display='none';
   photos['cnh']=[];initFotos();renderStep();
 }
-async function fazerLogout(){await sb.auth.signOut();location.reload();}
+async function fazerLogout(){limparEstado();await sb.auth.signOut();location.reload();}
 sb.auth.onAuthStateChange((e,s)=>{if(s?.user)initApp(s.user);});
-// Prevenir perda de dados ao voltar da camera no celular
+// Restaurar estado ao voltar da camera no celular
 document.addEventListener('visibilitychange', function(){
-  if(document.visibilityState === 'visible' && currentStep > 0){
-    // pagina voltou ao foco, nao resetar
+  if(document.visibilityState === 'visible'){
+    const estadoOk = restaurarEstado();
+    if(estadoOk){
+      // Restaurar fotos do sessionStorage
+      try{
+        const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
+        Object.keys(saved).forEach(secId=>{
+          if(!photos[secId])photos[secId]=[];
+          const existingUrls=photos[secId].map(p=>p.dataUrl);
+          saved[secId].forEach(dataUrl=>{
+            if(!existingUrls.includes(dataUrl)) photos[secId].push({file:null,dataUrl});
+          });
+        });
+      }catch(ex){}
+      renderStep();
+    }
   }
 });
 
@@ -284,7 +298,7 @@ function renderStep(){
   const c=document.getElementById('stepContent');
   [renderStep0,renderStep1,renderStep2,renderStep3][currentStep](c);
 }
-function goStep(n){currentStep=n;renderStep();window.scrollTo(0,0);}
+function goStep(n){salvarEstado();currentStep=n;renderStep();window.scrollTo(0,0);}
 
 function renderStep0(c){
   const today=new Date().toISOString().split('T')[0];
@@ -415,20 +429,18 @@ function renderStep2(c){
 
 function addFotos(input,secId){
   Array.from(input.files).forEach(file=>{
-    const r=new FileReader();
-    r.onload=e=>{
+    comprimirImagem(file,(blob,dataUrl)=>{
       if(!photos[secId])photos[secId]=[];
-      photos[secId].push({file,dataUrl:e.target.result});
-      // Salvar no sessionStorage para nao perder ao voltar da camera
+      photos[secId].push({file:blob, dataUrl});
       try{
         const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
         if(!saved[secId])saved[secId]=[];
-        saved[secId].push(e.target.result);
+        saved[secId].push(dataUrl);
         sessionStorage.setItem('fotos_vistoria',JSON.stringify(saved));
       }catch(ex){}
+      salvarEstado();
       if(currentStep===2)renderStep();
-    };
-    r.readAsDataURL(file);
+    });
   });
   input.value='';
 }
@@ -500,7 +512,7 @@ async function salvarVistoria(){
     const allSecs=[...FOTO_SECS_DEV,...FOTO_SECS_ENT,...FOTO_SECS_SIMPLES];
     for(const sec of allSecs){for(const p of(photos[sec.id]||[])){const path='vistorias/'+visId+'/'+sec.id+'_'+Date.now()+'.jpg';const {data:upData}=await sb.storage.from('Fotos - Vistorias').upload(path,p.file,{contentType:'image/jpeg',upsert:true});if(upData){const {data:url}=sb.storage.from('Fotos - Vistorias').getPublicUrl(path);await sb.from('fotos_vistoria').insert({vistoria_id:visId,secao:sec.id,nome_arquivo:path,url_publica:url?.publicUrl,tamanho_bytes:p.file.size});totalFotos++;}}}
     document.getElementById('successBox').innerHTML='<div class="success-box"><div class="ok-icon"><svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M4 11l5 5 9-9" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Vistoria salva!</h3><p>ID: <strong>'+vis.codigo+'</strong> | '+totalFotos+' foto(s)<br>Email enviado para '+EMAIL_EMPRESA+'</p></div>';
-    btn.style.display='none';try{sessionStorage.removeItem('fotos_vistoria');}catch(ex){}
+    btn.style.display='none';limparEstado();
     setTimeout(()=>{Object.keys(avariasDiv).forEach(k=>delete avariasDiv[k]);Object.keys(avariasEnt).forEach(k=>delete avariasEnt[k]);photos={};initFotos();nivelDev='Cheio';nivelEnt='Cheio';currentStep=0;renderStep();},6000);
   }catch(e){console.error(e);showToast('Erro ao salvar. Tente novamente.');btn.disabled=false;btn.textContent='Finalizar e salvar vistoria';}
 }
@@ -509,18 +521,17 @@ async function salvarVistoria(){
 function addFotoCnh(input){
   const file = input.files[0];
   if(!file) return;
-  photos['cnh'] = [];
-  const r = new FileReader();
-  r.onload = e => {
-    photos['cnh'] = [{file, dataUrl: e.target.result}];
+  comprimirImagem(file,(blob,dataUrl)=>{
+    photos['cnh'] = [{file:blob, dataUrl}];
     try{
       const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
-      saved['cnh']=[e.target.result];
+      saved['cnh']=[dataUrl];
       sessionStorage.setItem('fotos_vistoria',JSON.stringify(saved));
     }catch(ex){}
-    renderCnhGrid(e.target.result);
-  };
-  r.readAsDataURL(file);
+    salvarEstado();
+    renderCnhGrid(dataUrl);
+  });
+  input.value='';
 }
 function renderCnhGrid(dataUrl){
   const grid = document.getElementById('pg_cnh');
@@ -544,6 +555,86 @@ function delFotoCnh(){
   grid.innerHTML='';
   grid.appendChild(addBtn);
   grid.appendChild(inp);
+}
+
+
+// ============================================================
+// PERSISTENCIA DE ESTADO — evita perda de dados no celular
+// ============================================================
+function salvarEstado(){
+  try{
+    const estado={
+      step: currentStep,
+      nivelDev, nivelEnt,
+      avariasDiv: JSON.parse(JSON.stringify(avariasDiv)),
+      avariasEnt: JSON.parse(JSON.stringify(avariasEnt)),
+      campos:{
+        f_tipo: document.getElementById('f_tipo')?.value||'',
+        f_data: document.getElementById('f_data')?.value||'',
+        f_hora: document.getElementById('f_hora')?.value||'',
+        f_cliente: document.getElementById('f_cliente')?.value||'',
+        f_cnh: document.getElementById('f_cnh')?.value||'',
+        f_contrato: document.getElementById('f_contrato')?.value||'',
+        f_emailCliente: document.getElementById('f_emailCliente')?.value||'',
+        f_placa: document.getElementById('f_placa')?.value||'',
+        f_km: document.getElementById('f_km')?.value||'',
+        f_modelo: document.getElementById('f_modelo')?.value||'',
+        f_placa2: document.getElementById('f_placa2')?.value||'',
+        f_km2: document.getElementById('f_km2')?.value||'',
+        f_modelo2: document.getElementById('f_modelo2')?.value||'',
+      }
+    };
+    sessionStorage.setItem('vistoria_estado', JSON.stringify(estado));
+  }catch(ex){console.log('erro ao salvar estado',ex);}
+}
+
+function restaurarEstado(){
+  try{
+    const raw = sessionStorage.getItem('vistoria_estado');
+    if(!raw) return false;
+    const estado = JSON.parse(raw);
+    // Restaurar avarias
+    Object.assign(avariasDiv, estado.avariasDiv||{});
+    Object.assign(avariasEnt, estado.avariasEnt||{});
+    nivelDev = estado.nivelDev||'Cheio';
+    nivelEnt = estado.nivelEnt||'Cheio';
+    // Restaurar campos após render
+    setTimeout(()=>{
+      Object.keys(estado.campos||{}).forEach(id=>{
+        const el=document.getElementById(id);
+        if(el&&estado.campos[id])el.value=estado.campos[id];
+      });
+      // Restaurar nível combustível visual
+      document.querySelectorAll('#nivelDevBtns .nv-btn').forEach(b=>{b.classList.remove('sel');if(b.textContent===nivelDev)b.classList.add('sel');});
+      document.querySelectorAll('#nivelEntBtns .nv-btn').forEach(b=>{b.classList.remove('sel');if(b.textContent===nivelEnt)b.classList.add('sel');});
+    },100);
+    return true;
+  }catch(ex){return false;}
+}
+
+function limparEstado(){
+  sessionStorage.removeItem('vistoria_estado');
+  sessionStorage.removeItem('fotos_vistoria');
+}
+
+// Comprimir imagem antes de salvar (reduz de 3MB para ~200KB)
+function comprimirImagem(file, callback){
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX = 1200;
+      let w=img.width, h=img.height;
+      if(w>h){if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}}
+      else{if(h>MAX){w=Math.round(w*MAX/h);h=MAX;}}
+      canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      canvas.toBlob(blob=>callback(blob, canvas.toDataURL('image/jpeg',0.75)),'image/jpeg',0.75);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
 }
 
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2500);}
