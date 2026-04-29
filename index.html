@@ -230,7 +230,7 @@ async function initApp(user){
   document.getElementById('topSub').textContent=perfilAtual?.nome||user.email;
   document.getElementById('badgePerfil').textContent=perfilAtual?.perfil||'usuario';
   if(perfilAtual?.perfil==='vistoriador')document.getElementById('tabPainel').style.display='none';
-  initFotos();renderStep();
+  photos['cnh']=[];initFotos();renderStep();
 }
 async function fazerLogout(){await sb.auth.signOut();location.reload();}
 sb.auth.onAuthStateChange((e,s)=>{if(s?.user)initApp(s.user);});
@@ -314,6 +314,17 @@ function renderStep0(c){
     <div class="mb10"><label class="flabel">Nome do cliente<span class="req">*</span></label><input class="fi" type="text" id="f_cliente" placeholder="Nome completo"/></div>
     <div class="row2"><div><label class="flabel">CNH do condutor<span class="req">*</span></label><input class="fi" type="text" id="f_cnh" placeholder="00000000000"/></div>
     <div><label class="flabel">N contrato</label><input class="fi" type="text" id="f_contrato" placeholder="LOC-0001"/></div></div>
+    <div class="mb10"><label class="flabel">Foto da CNH <span class="req">*</span></label>
+      <div class="photo-zone" style="margin-top:4px">
+        <div class="photo-grid" id="pg_cnh">
+          <label class="photo-add-btn" for="fi_cnh" id="addCnhBtn">
+            <svg viewBox="0 0 20 20" fill="none"><rect x="1" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.3"/></svg>
+            <span>Tirar foto</span>
+          </label>
+          <input type="file" id="fi_cnh" accept="image/*" capture="environment" onchange="addFotoCnh(this)"/>
+        </div>
+      </div>
+    </div>
     <div class="mb10"><label class="flabel">E-mail do cliente (opcional)</label><input class="fi" type="email" id="f_emailCliente" placeholder="cliente@email.com"/></div>
   </div>${veicDevHTML}${veicEntHTML}
   <div class="btn-row"><button class="btn-next" onclick="nextStep0()">Proximo - Avarias</button></div>`;
@@ -441,6 +452,38 @@ async function salvarVistoria(){
     btn.style.display='none';
     setTimeout(()=>{avariasDiv={};avariasEnt={};photos={};initFotos();nivelDev='Cheio';nivelEnt='Cheio';currentStep=0;renderStep();},6000);
   }catch(e){console.error(e);showToast('Erro ao salvar. Tente novamente.');btn.disabled=false;btn.textContent='Finalizar e salvar vistoria';}
+}
+
+
+function addFotoCnh(input){
+  const file = input.files[0];
+  if(!file) return;
+  photos['cnh'] = [];
+  const r = new FileReader();
+  r.onload = e => {
+    photos['cnh'] = [{file, dataUrl: e.target.result}];
+    const grid = document.getElementById('pg_cnh');
+    const addBtn = document.getElementById('addCnhBtn');
+    const inp = document.getElementById('fi_cnh');
+    grid.innerHTML = '';
+    const thumb = document.createElement('div');
+    thumb.className = 'photo-thumb';
+    thumb.innerHTML = '<img src="'+e.target.result+'"/><button class="photo-del" onclick="delFotoCnh()">x</button>';
+    grid.appendChild(thumb);
+    grid.appendChild(addBtn);
+    grid.appendChild(inp);
+  };
+  r.readAsDataURL(file);
+}
+function delFotoCnh(){
+  photos['cnh']=[];
+  const grid=document.getElementById('pg_cnh');
+  if(!grid)return;
+  const addBtn=document.getElementById('addCnhBtn');
+  const inp=document.getElementById('fi_cnh');
+  grid.innerHTML='';
+  grid.appendChild(addBtn);
+  grid.appendChild(inp);
 }
 
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2500);}
