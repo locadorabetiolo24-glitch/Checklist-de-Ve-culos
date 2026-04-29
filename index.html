@@ -244,8 +244,11 @@ async function fazerLogin(){
 }
 async function initApp(user){
   usuarioAtual=user;
-  const {data}=await sb.from('usuarios').select('*').eq('email',user.email).single();
-  perfilAtual=data;
+  try{
+    const {data,error}=await sb.from('usuarios').select('*').eq('email',user.email).maybeSingle();
+    perfilAtual=data;
+    if(error) console.log('erro ao buscar usuario:', error);
+  }catch(e){perfilAtual=null;}
   document.getElementById('authScreen').style.display='none';
   document.getElementById('app').style.display='flex';
   document.getElementById('topSub').textContent=perfilAtual?.nome||user.email;
@@ -501,19 +504,21 @@ async function salvarVistoria(){
   try{
     const placa=document.getElementById('f_placa').value.trim().toUpperCase();
     let veiculoId=null;
-    const {data:vex}=await sb.from('veiculos').select('id').eq('placa',placa).single();
+    const {data:vex}=await sb.from('veiculos').select('id').eq('placa',placa).maybeSingle();
     if(vex){veiculoId=vex.id;}else{const {data:vn}=await sb.from('veiculos').insert({placa,modelo:document.getElementById('f_modelo')?.value||''}).select('id').single();veiculoId=vn?.id;}
     const nomeCliente=document.getElementById('f_cliente').value.trim();
     let clienteId=null;
-    const {data:cex}=await sb.from('clientes').select('id').eq('nome',nomeCliente).single();
+    const {data:cex}=await sb.from('clientes').select('id').eq('nome',nomeCliente).maybeSingle();
     if(cex){clienteId=cex.id;}else{const {data:cn}=await sb.from('clientes').insert({nome:nomeCliente,documento:document.getElementById('f_cnh').value,email:document.getElementById('f_emailCliente').value}).select('id').single();clienteId=cn?.id;}
     const sigVC=document.getElementById('sigV').toDataURL('image/png');
     const sigCC=document.getElementById('sigC').toDataURL('image/png');
     let obsTotal='';
-    if(document.getElementById('obs_dev')?.value)obsTotal+='Devolucao: '+document.getElementById('obs_dev').value;
-    if(document.getElementById('obs_ent')?.value)obsTotal+=(obsTotal?'\n':'')+'Entrega: '+document.getElementById('obs_ent').value;
+    const obsDev=document.getElementById('obs_dev');
+    const obsEnt=document.getElementById('obs_ent');
+    if(obsDev?.value)obsTotal+='Devolucao: '+obsDev.value;
+    if(obsEnt?.value)obsTotal+=(obsTotal?'\n':'')+'Entrega: '+obsEnt.value;
     const {data:vis,error:visErr}=await sb.from('vistorias').insert({
-      tipo:getTipo(),veiculo_id:veiculoId,cliente_id:clienteId,vistoriador_id:perfilAtual?.id,
+      tipo:getTipo(),veiculo_id:veiculoId,cliente_id:clienteId,vistoriador_id:perfilAtual?.id||null,
       km_atual:parseInt(document.getElementById('f_km').value)||null,
       nivel_combustivel:nivelDev,numero_contrato:document.getElementById('f_contrato')?.value||'',
       observacoes:obsTotal,cidade_assinatura:document.getElementById('f_cidade').value,
