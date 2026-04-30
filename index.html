@@ -326,6 +326,11 @@ function goStep(n){
   const campos=['f_tipo','f_data','f_hora','f_cliente','f_cnh','f_contrato','f_emailCliente','f_placa','f_km','f_modelo','f_placa2','f_km2','f_modelo2'];
   const chaves=['tipo','data','hora','cliente','cnh','contrato','emailCliente','placa','km','modelo','placa2','km2','modelo2'];
   campos.forEach((id,i)=>{const el=document.getElementById(id);if(el)dadosForm[chaves[i]]=el.value;});
+  // Salvar observações de avaria
+  const obsDev=document.getElementById('obs_dev');
+  const obsEnt=document.getElementById('obs_ent');
+  if(obsDev)dadosForm.obsDev=obsDev.value;
+  if(obsEnt)dadosForm.obsEnt=obsEnt.value;
   salvarEstado();
   currentStep=n;renderStep();window.scrollTo(0,0);
 }
@@ -523,8 +528,10 @@ async function salvarVistoria(){
     let obsTotal='';
     const obsDev=document.getElementById('obs_dev');
     const obsEnt=document.getElementById('obs_ent');
-    if(obsDev?.value)obsTotal+='Devolucao: '+obsDev.value;
-    if(obsEnt?.value)obsTotal+=(obsTotal?'\n':'')+'Entrega: '+obsEnt.value;
+    const obsDevVal=obsDev?.value||dadosForm.obsDev||'';
+    const obsEntVal=obsEnt?.value||dadosForm.obsEnt||'';
+    if(obsDevVal)obsTotal+='Devolucao: '+obsDevVal;
+    if(obsEntVal)obsTotal+=(obsTotal?'\n':'')+'Entrega: '+obsEntVal;
     const cidadeSign=document.getElementById('f_cidade')?.value||dadosForm.cidade||'';
     const vistoriadorNome=document.getElementById('f_vistoriador')?.value||dadosForm.vistoriador||perfilAtual?.nome||'';
     const {data:vis,error:visErr}=await sb.from('vistorias').insert({
@@ -538,8 +545,11 @@ async function salvarVistoria(){
     if(visErr)throw visErr;
     const visId=vis.id;
     const itensPayload=[];
-    if(isDev())AREAS_AVARIA.forEach((a,i)=>{const s=avariasDiv['dev_'+i];if(s&&s!=='Sem avaria')itensPayload.push({vistoria_id:visId,categoria:'Devolucao',item:a,status:'nok',observacao:s});});
-    if(isEnt())AREAS_AVARIA.forEach((a,i)=>{const s=avariasEnt['ent_'+i];if(s&&s!=='Sem avaria')itensPayload.push({vistoria_id:visId,categoria:'Entrega',item:a,status:'nok',observacao:s});});
+    const tipoAtual=dadosForm.tipo||getTipo();
+    const devOk=tipoAtual==='devolucao'||tipoAtual==='substituicao';
+    const entOk=tipoAtual==='entrega'||tipoAtual==='substituicao';
+    if(devOk)AREAS_AVARIA.forEach((a,i)=>{const s=avariasDiv['dev_'+i];if(s&&s!=='Sem avaria')itensPayload.push({vistoria_id:visId,categoria:'Devolucao',item:a,status:'nok',observacao:s});});
+    if(entOk)AREAS_AVARIA.forEach((a,i)=>{const s=avariasEnt['ent_'+i];if(s&&s!=='Sem avaria')itensPayload.push({vistoria_id:visId,categoria:'Entrega',item:a,status:'nok',observacao:s});});
     if(itensPayload.length)await sb.from('itens_vistoria').insert(itensPayload);
     let totalFotos=0;
     const allSecs=[...FOTO_SECS_DEV,...FOTO_SECS_ENT,...FOTO_SECS_SIMPLES];
