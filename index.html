@@ -245,6 +245,11 @@ async function fazerLogin(){
 }
 async function initApp(user){
   usuarioAtual=user;
+  // Manter sessão renovada automaticamente
+  sb.auth.onAuthStateChange((event, session) => {
+    if(event === 'TOKEN_REFRESHED') console.log('sessao renovada');
+    if(event === 'SIGNED_OUT') location.reload();
+  });
   try{
     const {data,error}=await sb.from('usuarios').select('*').eq('email',user.email).maybeSingle();
     perfilAtual=data;
