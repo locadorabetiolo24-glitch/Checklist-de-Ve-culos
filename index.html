@@ -124,16 +124,6 @@ canvas.sig{display:block;width:100%;height:120px;cursor:crosshair;touch-action:n
 .fotos-grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:7px;border:1px solid var(--border)}
 .item-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
 .item-row:last-child{border:none}
-/* Modal camera */
-#cameraModal{display:none;position:fixed;inset:0;z-index:200;background:#000;flex-direction:column}
-#cameraModal.open{display:flex}
-#cameraVideo{width:100%;height:calc(100vh - 120px);object-fit:cover;flex-shrink:0}
-.cam-bar{background:#111;height:120px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;position:relative}
-.cam-bar-top{background:rgba(0,0,0,0.7);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:absolute;top:0;left:0;right:0;z-index:10}
-.cam-capture{width:70px;height:70px;border-radius:50%;background:white;border:5px solid #ccc;cursor:pointer;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,255,255,0.3)}
-.cam-cancel{background:none;border:1px solid #888;color:white;padding:10px 18px;border-radius:8px;font-size:14px;cursor:pointer}
-.cam-switch{background:none;border:1px solid #888;color:white;padding:10px 18px;border-radius:8px;font-size:14px;cursor:pointer}
-#cameraCanvas{display:none}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1f2937;color:white;padding:10px 20px;border-radius:20px;font-size:13px;z-index:999;display:none;white-space:nowrap}
 @media(max-width:400px){.stats-grid{grid-template-columns:1fr 1fr}.detail-grid{grid-template-columns:1fr}.row2{grid-template-columns:1fr}}
 </style>
@@ -197,15 +187,6 @@ canvas.sig{display:block;width:100%;height:120px;cursor:crosshair;touch-action:n
     <div class="modal-body" id="modalBody"></div>
   </div>
 </div>
-<div id="cameraModal">
-  <video id="cameraVideo" autoplay playsinline></video>
-  <canvas id="cameraCanvas"></canvas>
-  <div class="cam-bar">
-    <button class="cam-switch" onclick="alternarCamera()">🔄 Virar</button>
-    <button class="cam-capture" id="btnCapturar" onclick="capturarFoto()"></button>
-    <button class="cam-cancel" onclick="fecharCamera()">✕</button>
-  </div>
-</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -217,8 +198,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let usuarioAtual=null,perfilAtual=null,currentStep=0;
 var avariasDiv={},avariasEnt={};
-var dadosForm={tipo:'',data:'',hora:'',cliente:'',cnh:'',contrato:'',emailCliente:'',placa:'',km:'',modelo:'',placa2:'',km2:'',modelo2:'',cidade:'',vistoriador:''};
-var avariasDiv={},avariasEnt={};
+var dadosForm={tipo:'',data:'',hora:'',cliente:'',cnh:'',contrato:'',emailCliente:'',placa:'',km:'',modelo:'',placa2:'',km2:'',modelo2:'',obsDev:'',obsEnt:''};
 let photos={},nivelDev='Cheio',nivelEnt='Cheio';
 let hasSigV=false,hasSigC=false;
 
@@ -245,46 +225,19 @@ async function fazerLogin(){
 }
 async function initApp(user){
   usuarioAtual=user;
-  // Manter sessão renovada automaticamente
-  sb.auth.onAuthStateChange((event, session) => {
-    if(event === 'TOKEN_REFRESHED') console.log('sessao renovada');
-    if(event === 'SIGNED_OUT') location.reload();
-  });
   try{
     const {data,error}=await sb.from('usuarios').select('*').eq('email',user.email).maybeSingle();
     perfilAtual=data;
-    if(error) console.log('erro ao buscar usuario:', error);
   }catch(e){perfilAtual=null;}
   document.getElementById('authScreen').style.display='none';
   document.getElementById('app').style.display='flex';
   document.getElementById('topSub').textContent=perfilAtual?.nome||user.email;
   document.getElementById('badgePerfil').textContent=perfilAtual?.perfil||'usuario';
   if(perfilAtual?.perfil==='vistoriador')document.getElementById('tabPainel').style.display='none';
-  photos['cnh']=[];initFotos();renderStep();
+  initFotos();renderStep();
 }
-async function fazerLogout(){limparEstado();await sb.auth.signOut();location.reload();}
+async function fazerLogout(){await sb.auth.signOut();location.reload();}
 sb.auth.onAuthStateChange((e,s)=>{if(s?.user)initApp(s.user);});
-// Restaurar estado ao voltar da camera no celular
-document.addEventListener('visibilitychange', function(){
-  if(document.visibilityState === 'visible'){
-    const estadoOk = restaurarEstado();
-    if(estadoOk){
-      // Restaurar fotos do sessionStorage
-      try{
-        const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
-        Object.keys(saved).forEach(secId=>{
-          if(!photos[secId])photos[secId]=[];
-          const existingUrls=photos[secId].map(p=>p.dataUrl);
-          saved[secId].forEach(dataUrl=>{
-            if(!existingUrls.includes(dataUrl)) photos[secId].push({file:null,dataUrl});
-          });
-        });
-      }catch(ex){}
-      renderStep();
-    }
-  }
-});
-
 sb.auth.getSession().then(({data:{session}})=>{if(!session){document.getElementById('authScreen').style.display='flex';document.getElementById('app').style.display='none';}});
 
 function showTab(t){
@@ -327,16 +280,9 @@ function renderStep(){
   [renderStep0,renderStep1,renderStep2,renderStep3][currentStep](c);
 }
 function goStep(n){
-  // Salvar dados dos campos antes de trocar de passo
-  const campos=['f_tipo','f_data','f_hora','f_cliente','f_cnh','f_contrato','f_emailCliente','f_placa','f_km','f_modelo','f_placa2','f_km2','f_modelo2'];
-  const chaves=['tipo','data','hora','cliente','cnh','contrato','emailCliente','placa','km','modelo','placa2','km2','modelo2'];
+  const campos=['f_tipo','f_data','f_hora','f_cliente','f_cnh','f_contrato','f_emailCliente','f_placa','f_km','f_modelo','f_placa2','f_km2','f_modelo2','obs_dev','obs_ent'];
+  const chaves=['tipo','data','hora','cliente','cnh','contrato','emailCliente','placa','km','modelo','placa2','km2','modelo2','obsDev','obsEnt'];
   campos.forEach((id,i)=>{const el=document.getElementById(id);if(el)dadosForm[chaves[i]]=el.value;});
-  // Salvar observações de avaria
-  const obsDev=document.getElementById('obs_dev');
-  const obsEnt=document.getElementById('obs_ent');
-  if(obsDev)dadosForm.obsDev=obsDev.value;
-  if(obsEnt)dadosForm.obsEnt=obsEnt.value;
-  salvarEstado();
   currentStep=n;renderStep();window.scrollTo(0,0);
 }
 
@@ -377,16 +323,6 @@ function renderStep0(c){
     <div class="mb10"><label class="flabel">Nome do cliente<span class="req">*</span></label><input class="fi" type="text" id="f_cliente" placeholder="Nome completo"/></div>
     <div class="row2"><div><label class="flabel">CNH do condutor<span class="req">*</span></label><input class="fi" type="text" id="f_cnh" placeholder="00000000000"/></div>
     <div><label class="flabel">N contrato</label><input class="fi" type="text" id="f_contrato" placeholder="LOC-0001"/></div></div>
-    <div class="mb10"><label class="flabel">Foto da CNH <span class="req">*</span></label>
-      <div class="photo-zone" style="margin-top:4px">
-        <div class="photo-grid" id="pg_cnh">
-          <div class="photo-add-btn" id="addCnhBtn" onclick="abrirCameraCnh()">
-            <svg viewBox="0 0 20 20" fill="none"><rect x="1" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.3"/></svg>
-            <span>Tirar foto</span>
-          </div>
-        </div>
-      </div>
-    </div>
     <div class="mb10"><label class="flabel">E-mail do cliente (opcional)</label><input class="fi" type="email" id="f_emailCliente" placeholder="cliente@email.com"/></div>
   </div>${veicDevHTML}${veicEntHTML}
   <div class="btn-row"><button class="btn-next" onclick="nextStep0()">Proximo - Avarias</button></div>`;
@@ -439,64 +375,22 @@ function setAvaria(btn,id,obj,v){
 
 function initFotos(){[...FOTO_SECS_DEV,...FOTO_SECS_ENT,...FOTO_SECS_SIMPLES].forEach(s=>{if(!photos[s.id])photos[s.id]=[];});}
 
-function restoreFotosFromSession(){
-  try{
-    const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
-    Object.keys(saved).forEach(secId=>{
-      if(!photos[secId])photos[secId]=[];
-      // Restaurar apenas dataUrls que ainda nao estao em photos
-      const existingUrls=photos[secId].map(p=>p.dataUrl);
-      saved[secId].forEach(dataUrl=>{
-        if(!existingUrls.includes(dataUrl)){
-          photos[secId].push({file:null,dataUrl});
-        }
-      });
-    });
-  }catch(ex){}
-}
-
 function renderStep2(c){
   const tipo=getTipo();
-  restoreFotosFromSession();
   const secs=tipo==='substituicao'?[...FOTO_SECS_DEV,...FOTO_SECS_ENT]:tipo==='devolucao'?FOTO_SECS_DEV:FOTO_SECS_SIMPLES;
   const html=secs.map(sec=>{
     const grid=(photos[sec.id]||[]).map((p,i)=>'<div class="photo-thumb"><img src="'+p.dataUrl+'"/><button class="photo-del" onclick="delFoto(\''+sec.id+'\','+i+')">x</button></div>').join('');
-    return '<div class="photo-zone"><div class="pz-label">'+sec.label+(sec.req?' *':'')+'</div><div class="photo-grid" id="pg_'+sec.id+'">'+grid+'<div class="photo-add-btn" onclick="abrirCamera(\''+sec.id+'\',\''+sec.label+'\')"><svg viewBox="0 0 20 20" fill="none"><rect x="1" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.3"/></svg><span>Foto</span></div></div></div>';
+    return '<div class="photo-zone"><div class="pz-label">'+sec.label+(sec.req?' *':'')+'</div><div class="photo-grid" id="pg_'+sec.id+'">'+grid+'<label class="photo-add-btn" for="fi_'+sec.id+'"><svg viewBox="0 0 20 20" fill="none"><rect x="1" y="4" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="11" r="3" stroke="currentColor" stroke-width="1.3"/></svg><span>Foto</span></label><input type="file" id="fi_'+sec.id+'" accept="image/*" capture="environment" multiple onchange="addFotos(this,\''+sec.id+'\')"/></div></div>';
   }).join('');
   c.innerHTML='<div class="sec-card"><div class="sec-head"><div class="sec-head-icon"><svg viewBox="0 0 14 14" fill="none"><rect x="1" y="3" width="12" height="9" rx="1.5" stroke="#C0392B" stroke-width="1.2"/><circle cx="7" cy="7.5" r="2" stroke="#C0392B" stroke-width="1.2"/></svg></div><div class="sec-head-title">Fotos</div></div>'+html+'</div><div class="btn-row"><button class="btn-back" onclick="goStep(1)">Voltar</button><button class="btn-next" onclick="goStep(3)">Proximo - Assinatura</button></div>';
 }
 
-function addFotos(input,secId){
-  Array.from(input.files).forEach(file=>{
-    comprimirImagem(file,(blob,dataUrl)=>{
-      if(!photos[secId])photos[secId]=[];
-      photos[secId].push({file:blob, dataUrl});
-      try{
-        const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
-        if(!saved[secId])saved[secId]=[];
-        saved[secId].push(dataUrl);
-        sessionStorage.setItem('fotos_vistoria',JSON.stringify(saved));
-      }catch(ex){}
-      salvarEstado();
-      if(currentStep===2)renderStep();
-    });
-  });
-  input.value='';
-}
+function addFotos(input,secId){Array.from(input.files).forEach(file=>{const r=new FileReader();r.onload=e=>{photos[secId].push({file,dataUrl:e.target.result});if(currentStep===2)renderStep();};r.readAsDataURL(file);});input.value='';}
 function delFoto(secId,idx){photos[secId].splice(idx,1);if(currentStep===2)renderStep();}
 
 function renderStep3(c){
-  // Restaurar foto CNH se houver no session
-  try{
-    const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
-    if(saved['cnh']&&saved['cnh'][0]&&(!photos['cnh']||!photos['cnh'].length)){
-      photos['cnh']=[{file:null,dataUrl:saved['cnh'][0]}];
-    }
-  }catch(ex){}
   const today=new Date().toISOString().split('T')[0];
-  // Contar fotos disponíveis
-  const totalFotosDisp = Object.values(photos).reduce((s,a)=>s+(a?a.length:0),0);
-  c.innerHTML='<div class="sec-card"><div class="sec-head"><div class="sec-head-icon"><svg viewBox="0 0 14 14" fill="none"><path d="M2 11c1-2 2-3.5 2.5-4.5s2.5-1 3.5 0 0 2.5-1 3.5-2.5 1-3.5 0" stroke="#C0392B" stroke-width="1.2"/><path d="M8.5 3l2 2-4 4-2-.5.5-2 3.5-3.5z" stroke="#C0392B" stroke-width="1.2"/></svg></div><div class="sec-head-title">Assinatura e finalizacao</div></div>'+'<div style="background:#FEF2F2;border:1px solid #E74C3C;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;color:#C0392B;text-align:center">📷 <strong>'+totalFotosDisp+' foto(s)</strong> prontas para envio</div>'+<div class="mb10"><label class="flabel">Vistoriador *</label><input class="fi" type="text" id="f_vistoriador" value="'+(perfilAtual?.nome||'')+'" placeholder="Nome do vistoriador"/></div><div class="row2"><div><label class="flabel">Cidade</label><input class="fi" type="text" id="f_cidade" placeholder="Cidade"/></div><div><label class="flabel">Data</label><input class="fi" type="date" id="f_dataSign" value="'+today+'"/></div></div><div class="mb10"><label class="flabel">Assinatura do vistoriador *</label><div class="sign-wrap"><canvas class="sig" id="sigV"></canvas><div class="sig-line"></div><div class="sig-hint">Assine acima</div></div><button class="btn-clear" onclick="limparSig(\'sigV\',\'hasSigV\')">Limpar</button></div><div class="mb10"><label class="flabel">Assinatura do cliente *</label><div class="sign-wrap"><canvas class="sig" id="sigC"></canvas><div class="sig-line"></div><div class="sig-hint">Assine acima</div></div><button class="btn-clear" onclick="limparSig(\'sigC\',\'hasSigC\')">Limpar</button></div><div class="accept-box"><input type="checkbox" id="aceite"/><label for="aceite">Confirmo que as informacoes e fotos refletem o estado real do veiculo nesta vistoria.</label></div><button class="btn-next" onclick="salvarVistoria()" id="btnSalvar" style="width:100%">Finalizar e salvar vistoria</button><div id="successBox"></div></div><div class="btn-row"><button class="btn-back" onclick="goStep(2)">Voltar</button></div>';
+  c.innerHTML='<div class="sec-card"><div class="sec-head"><div class="sec-head-icon"><svg viewBox="0 0 14 14" fill="none"><path d="M2 11c1-2 2-3.5 2.5-4.5s2.5-1 3.5 0 0 2.5-1 3.5-2.5 1-3.5 0" stroke="#C0392B" stroke-width="1.2"/><path d="M8.5 3l2 2-4 4-2-.5.5-2 3.5-3.5z" stroke="#C0392B" stroke-width="1.2"/></svg></div><div class="sec-head-title">Assinatura e finalizacao</div></div><div class="mb10"><label class="flabel">Vistoriador *</label><input class="fi" type="text" id="f_vistoriador" value="'+(perfilAtual?.nome||'')+'" placeholder="Nome do vistoriador"/></div><div class="row2"><div><label class="flabel">Cidade</label><input class="fi" type="text" id="f_cidade" placeholder="Cidade"/></div><div><label class="flabel">Data</label><input class="fi" type="date" id="f_dataSign" value="'+today+'"/></div></div><div class="mb10"><label class="flabel">Assinatura do vistoriador *</label><div class="sign-wrap"><canvas class="sig" id="sigV"></canvas><div class="sig-line"></div><div class="sig-hint">Assine acima</div></div><button class="btn-clear" onclick="limparSig(\'sigV\',\'hasSigV\')">Limpar</button></div><div class="mb10"><label class="flabel">Assinatura do cliente *</label><div class="sign-wrap"><canvas class="sig" id="sigC"></canvas><div class="sig-line"></div><div class="sig-hint">Assine acima</div></div><button class="btn-clear" onclick="limparSig(\'sigC\',\'hasSigC\')">Limpar</button></div><div class="accept-box"><input type="checkbox" id="aceite"/><label for="aceite">Confirmo que as informacoes e fotos refletem o estado real do veiculo nesta vistoria.</label></div><button class="btn-next" onclick="salvarVistoria()" id="btnSalvar" style="width:100%">Finalizar e salvar vistoria</button><div id="successBox"></div></div><div class="btn-row"><button class="btn-back" onclick="goStep(2)">Voltar</button></div>';
   setTimeout(()=>{setupSig('sigV','hasSigV');setupSig('sigC','hasSigC');},200);
 }
 
@@ -522,261 +416,60 @@ async function salvarVistoria(){
   const btn=document.getElementById('btnSalvar');
   btn.disabled=true;btn.textContent='Salvando...';
   try{
-    const placa=(dadosForm.placa||document.getElementById('f_placa')?.value||'').trim().toUpperCase();
+    const placa=(dadosForm.placa||'').trim().toUpperCase();
     let veiculoId=null;
     const {data:vex}=await sb.from('veiculos').select('id').eq('placa',placa).maybeSingle();
     if(vex){veiculoId=vex.id;}else{const {data:vn}=await sb.from('veiculos').insert({placa,modelo:dadosForm.modelo||''}).select('id').single();veiculoId=vn?.id;}
-    const nomeCliente=(dadosForm.cliente||document.getElementById('f_cliente')?.value||'').trim();
+    const nomeCliente=(dadosForm.cliente||'').trim();
     let clienteId=null;
     const {data:cex}=await sb.from('clientes').select('id').eq('nome',nomeCliente).maybeSingle();
     if(cex){clienteId=cex.id;}else{const {data:cn}=await sb.from('clientes').insert({nome:nomeCliente,documento:dadosForm.cnh||'',email:dadosForm.emailCliente||''}).select('id').single();clienteId=cn?.id;}
     const sigVC=document.getElementById('sigV').toDataURL('image/png');
     const sigCC=document.getElementById('sigC').toDataURL('image/png');
     let obsTotal='';
-    const obsDev=document.getElementById('obs_dev');
-    const obsEnt=document.getElementById('obs_ent');
-    const obsDevVal=obsDev?.value||dadosForm.obsDev||'';
-    const obsEntVal=obsEnt?.value||dadosForm.obsEnt||'';
-    if(obsDevVal)obsTotal+='Devolucao: '+obsDevVal;
-    if(obsEntVal)obsTotal+=(obsTotal?'\n':'')+'Entrega: '+obsEntVal;
-    const cidadeSign=document.getElementById('f_cidade')?.value||dadosForm.cidade||'';
-    const vistoriadorNome=document.getElementById('f_vistoriador')?.value||dadosForm.vistoriador||perfilAtual?.nome||'';
+    if(document.getElementById('obs_dev')?.value)obsTotal+='Devolucao: '+document.getElementById('obs_dev').value;
+    if(document.getElementById('obs_ent')?.value)obsTotal+=(obsTotal?'\n':'')+'Entrega: '+document.getElementById('obs_ent').value;
     const {data:vis,error:visErr}=await sb.from('vistorias').insert({
-      tipo:dadosForm.tipo||getTipo(),veiculo_id:veiculoId,cliente_id:clienteId,vistoriador_id:perfilAtual?.id||null,
-      km_atual:parseInt(dadosForm.km)||null,
-      nivel_combustivel:nivelDev,numero_contrato:dadosForm.contrato||'',
-      observacoes:obsTotal,cidade_assinatura:cidadeSign,
-      data_vistoria:dadosForm.data||new Date().toISOString().split('T')[0],hora_vistoria:dadosForm.hora||'',
+      tipo:getTipo(),veiculo_id:veiculoId,cliente_id:clienteId,vistoriador_id:perfilAtual?.id,
+      km_atual:parseInt(document.getElementById('f_km').value)||null,
+      nivel_combustivel:nivelDev,numero_contrato:document.getElementById('f_contrato')?.value||'',
+      observacoes:obsTotal,cidade_assinatura:document.getElementById('f_cidade').value,
+      data_vistoria:document.getElementById('f_data').value,hora_vistoria:document.getElementById('f_hora').value,
       assinatura_vistoriador:sigVC,assinatura_cliente:sigCC,status:'concluida',finalizado_em:new Date().toISOString()
     }).select('id,codigo').single();
     if(visErr)throw visErr;
     const visId=vis.id;
     const itensPayload=[];
     const tipoAtual=dadosForm.tipo||getTipo();
-    const devOk=tipoAtual==='devolucao'||tipoAtual==='substituicao';
-    const entOk=tipoAtual==='entrega'||tipoAtual==='substituicao';
-    if(devOk)AREAS_AVARIA.forEach((a,i)=>{const s=avariasDiv['dev_'+i];if(s&&s!=='Sem avaria')itensPayload.push({vistoria_id:visId,categoria:'Devolucao',item:a,status:'nok',observacao:s});});
-    if(entOk)AREAS_AVARIA.forEach((a,i)=>{const s=avariasEnt['ent_'+i];if(s&&s!=='Sem avaria')itensPayload.push({vistoria_id:visId,categoria:'Entrega',item:a,status:'nok',observacao:s});});
+    if(tipoAtual==='devolucao'||tipoAtual==='substituicao')AREAS_AVARIA.forEach((a,i)=>{const s=avariasDiv['dev_'+i];if(s&&s!=='Sem avaria')itensPayload.push({vistoria_id:visId,categoria:'Devolucao',item:a,status:'nok',observacao:s});});
+    if(tipoAtual==='entrega'||tipoAtual==='substituicao')AREAS_AVARIA.forEach((a,i)=>{const s=avariasEnt['ent_'+i];if(s&&s!=='Sem avaria')itensPayload.push({vistoria_id:visId,categoria:'Entrega',item:a,status:'nok',observacao:s});});
     if(itensPayload.length)await sb.from('itens_vistoria').insert(itensPayload);
     let totalFotos=0;
-    const allSecs=[...FOTO_SECS_DEV,...FOTO_SECS_ENT,...FOTO_SECS_SIMPLES];
-    for(const sec of allSecs){for(const p of(photos[sec.id]||[])){const path='vistorias/'+visId+'/'+sec.id+'_'+Date.now()+'.jpg';const {data:upData}=await sb.storage.from('Fotos - Vistorias').upload(path,p.file,{contentType:'image/jpeg',upsert:true});if(upData){const {data:url}=sb.storage.from('Fotos - Vistorias').getPublicUrl(path);await sb.from('fotos_vistoria').insert({vistoria_id:visId,secao:sec.id,nome_arquivo:path,url_publica:url?.publicUrl,tamanho_bytes:p.file.size});totalFotos++;}}}
+    const todasSecs=[...FOTO_SECS_DEV,...FOTO_SECS_ENT,...FOTO_SECS_SIMPLES,{id:'cnh',label:'CNH'}];
+    for(const sec of todasSecs){
+      for(const p of(photos[sec.id]||[])){
+        try{
+          let blob=p.file;
+          if(!blob&&p.dataUrl){const r=await fetch(p.dataUrl);blob=await r.blob();}
+          if(!blob)continue;
+          const path='vistorias/'+visId+'/'+sec.id+'_'+Date.now()+'.jpg';
+          const {data:upData,error:upErr}=await sb.storage.from('fotos-vistorias').upload(path,blob,{contentType:'image/jpeg',upsert:true});
+          if(upErr){console.log('erro upload',sec.id,upErr);continue;}
+          if(upData){
+            const {data:url}=sb.storage.from('fotos-vistorias').getPublicUrl(path);
+            await sb.from('fotos_vistoria').insert({vistoria_id:visId,secao:sec.id,nome_arquivo:path,url_publica:url?.publicUrl,tamanho_bytes:blob.size});
+            totalFotos++;
+          }
+        }catch(ex){console.log('ex foto',sec.id,ex.message);}
+      }
+    }
     document.getElementById('successBox').innerHTML='<div class="success-box"><div class="ok-icon"><svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M4 11l5 5 9-9" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Vistoria salva!</h3><p>ID: <strong>'+vis.codigo+'</strong> | '+totalFotos+' foto(s)<br>Email enviado para '+EMAIL_EMPRESA+'</p></div>';
-    btn.style.display='none';limparEstado();
-    setTimeout(()=>{Object.keys(avariasDiv).forEach(k=>delete avariasDiv[k]);Object.keys(avariasEnt).forEach(k=>delete avariasEnt[k]);photos={};initFotos();nivelDev='Cheio';nivelEnt='Cheio';currentStep=0;renderStep();},6000);
+    btn.style.display='none';
+    setTimeout(()=>{Object.keys(avariasDiv).forEach(k=>delete avariasDiv[k]);Object.keys(avariasEnt).forEach(k=>delete avariasEnt[k]);Object.keys(dadosForm).forEach(k=>dadosForm[k]='');photos={};initFotos();nivelDev='Cheio';nivelEnt='Cheio';currentStep=0;renderStep();},6000);
   }catch(e){console.error(e);showToast('Erro ao salvar. Tente novamente.');btn.disabled=false;btn.textContent='Finalizar e salvar vistoria';}
 }
 
-
-function addFotoCnh(input){
-  const file = input.files[0];
-  if(!file) return;
-  comprimirImagem(file,(blob,dataUrl)=>{
-    photos['cnh'] = [{file:blob, dataUrl}];
-    try{
-      const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
-      saved['cnh']=[dataUrl];
-      sessionStorage.setItem('fotos_vistoria',JSON.stringify(saved));
-    }catch(ex){}
-    salvarEstado();
-    renderCnhGrid(dataUrl);
-  });
-  input.value='';
-}
-function renderCnhGrid(dataUrl){
-  const grid = document.getElementById('pg_cnh');
-  if(!grid)return;
-  const addBtn = document.getElementById('addCnhBtn');
-  const inp = document.getElementById('fi_cnh');
-  grid.innerHTML = '';
-  const thumb = document.createElement('div');
-  thumb.className = 'photo-thumb';
-  thumb.innerHTML = '<img src="'+dataUrl+'"/><button class="photo-del" onclick="delFotoCnh()">x</button>';
-  grid.appendChild(thumb);
-  grid.appendChild(addBtn);
-  grid.appendChild(inp);
-}
-function delFotoCnh(){
-  photos['cnh']=[];
-  const grid=document.getElementById('pg_cnh');
-  if(!grid)return;
-  const addBtn=document.getElementById('addCnhBtn');
-  const inp=document.getElementById('fi_cnh');
-  grid.innerHTML='';
-  grid.appendChild(addBtn);
-  grid.appendChild(inp);
-}
-
-
-// ============================================================
-// PERSISTENCIA DE ESTADO — evita perda de dados no celular
-// ============================================================
-function salvarEstado(){
-  try{
-    const estado={
-      step: currentStep,
-      nivelDev, nivelEnt,
-      avariasDiv: JSON.parse(JSON.stringify(avariasDiv)),
-      avariasEnt: JSON.parse(JSON.stringify(avariasEnt)),
-      campos:{
-        f_tipo: document.getElementById('f_tipo')?.value||'',
-        f_data: document.getElementById('f_data')?.value||'',
-        f_hora: document.getElementById('f_hora')?.value||'',
-        f_cliente: document.getElementById('f_cliente')?.value||'',
-        f_cnh: document.getElementById('f_cnh')?.value||'',
-        f_contrato: document.getElementById('f_contrato')?.value||'',
-        f_emailCliente: document.getElementById('f_emailCliente')?.value||'',
-        f_placa: document.getElementById('f_placa')?.value||'',
-        f_km: document.getElementById('f_km')?.value||'',
-        f_modelo: document.getElementById('f_modelo')?.value||'',
-        f_placa2: document.getElementById('f_placa2')?.value||'',
-        f_km2: document.getElementById('f_km2')?.value||'',
-        f_modelo2: document.getElementById('f_modelo2')?.value||'',
-      }
-    };
-    sessionStorage.setItem('vistoria_estado', JSON.stringify(estado));
-  }catch(ex){console.log('erro ao salvar estado',ex);}
-}
-
-function restaurarEstado(){
-  try{
-    const raw = sessionStorage.getItem('vistoria_estado');
-    if(!raw) return false;
-    const estado = JSON.parse(raw);
-    // Restaurar avarias
-    Object.assign(avariasDiv, estado.avariasDiv||{});
-    Object.assign(avariasEnt, estado.avariasEnt||{});
-    nivelDev = estado.nivelDev||'Cheio';
-    nivelEnt = estado.nivelEnt||'Cheio';
-    // Restaurar campos após render
-    setTimeout(()=>{
-      Object.keys(estado.campos||{}).forEach(id=>{
-        const el=document.getElementById(id);
-        if(el&&estado.campos[id])el.value=estado.campos[id];
-      });
-      // Restaurar nível combustível visual
-      document.querySelectorAll('#nivelDevBtns .nv-btn').forEach(b=>{b.classList.remove('sel');if(b.textContent===nivelDev)b.classList.add('sel');});
-      document.querySelectorAll('#nivelEntBtns .nv-btn').forEach(b=>{b.classList.remove('sel');if(b.textContent===nivelEnt)b.classList.add('sel');});
-    },100);
-    return true;
-  }catch(ex){return false;}
-}
-
-function limparEstado(){
-  sessionStorage.removeItem('vistoria_estado');
-  sessionStorage.removeItem('fotos_vistoria');
-}
-
-// Comprimir imagem antes de salvar (reduz de 3MB para ~200KB)
-function comprimirImagem(file, callback){
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const MAX = 1200;
-      let w=img.width, h=img.height;
-      if(w>h){if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}}
-      else{if(h>MAX){w=Math.round(w*MAX/h);h=MAX;}}
-      canvas.width=w; canvas.height=h;
-      canvas.getContext('2d').drawImage(img,0,0,w,h);
-      canvas.toBlob(blob=>callback(blob, canvas.toDataURL('image/jpeg',0.75)),'image/jpeg',0.75);
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-
-// ============================================================
-// CAMERA MODAL — evita reload da pagina no celular
-// ============================================================
-let cameraStream=null, cameraFacing='environment', cameraTarget=null, cameraSecId=null;
-
-async function abrirCamera(secId, label){
-  cameraSecId = secId;
-  cameraTarget = secId;
-  document.getElementById('btnCapturar').onclick = capturarFoto;
-  document.getElementById('cameraModal').classList.add('open');
-  await iniciarCamera();
-}
-
-async function iniciarCamera(){
-  try{
-    if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());}
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video:{facingMode: cameraFacing, width:{ideal:1280}, height:{ideal:720}},
-      audio:false
-    });
-    document.getElementById('cameraVideo').srcObject = cameraStream;
-  }catch(e){
-    // Se nao tiver camera, cair para input file
-    fecharCamera();
-    document.getElementById('fi_'+cameraSecId)?.click();
-  }
-}
-
-async function alternarCamera(){
-  cameraFacing = cameraFacing==='environment'?'user':'environment';
-  await iniciarCamera();
-}
-
-function capturarFoto(){
-  const video = document.getElementById('cameraVideo');
-  const canvas = document.getElementById('cameraCanvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video,0,0);
-  canvas.toBlob(blob=>{
-    const dataUrl = canvas.toDataURL('image/jpeg',0.75);
-    if(!photos[cameraSecId]) photos[cameraSecId]=[];
-    photos[cameraSecId].push({file:blob, dataUrl});
-    // Salvar no sessionStorage
-    try{
-      const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
-      if(!saved[cameraSecId])saved[cameraSecId]=[];
-      saved[cameraSecId].push(dataUrl);
-      sessionStorage.setItem('fotos_vistoria',JSON.stringify(saved));
-    }catch(ex){}
-    salvarEstado();
-    fecharCamera();
-    if(currentStep===2) renderStep();
-  },'image/jpeg',0.75);
-}
-
-function capturarFotoCnh(){
-  const video = document.getElementById('cameraVideo');
-  const canvas = document.getElementById('cameraCanvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video,0,0);
-  canvas.toBlob(blob=>{
-    const dataUrl = canvas.toDataURL('image/jpeg',0.75);
-    photos['cnh'] = [{file:blob, dataUrl}];
-    try{
-      const saved=JSON.parse(sessionStorage.getItem('fotos_vistoria')||'{}');
-      saved['cnh']=[dataUrl];
-      sessionStorage.setItem('fotos_vistoria',JSON.stringify(saved));
-    }catch(ex){}
-    salvarEstado();
-    fecharCamera();
-    renderCnhGrid(dataUrl);
-  },'image/jpeg',0.75);
-}
-
-function fecharCamera(){
-  if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null;}
-  document.getElementById('cameraModal').classList.remove('open');
-}
-
-async function abrirCameraCnh(){
-  cameraSecId='cnh';
-  document.getElementById('btnCapturar').onclick = capturarFotoCnh;
-  document.getElementById('cameraModal').classList.add('open');
-  await iniciarCamera();
-}
-
-function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',5000);}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2500);}
 </script>
 </body>
 </html>
